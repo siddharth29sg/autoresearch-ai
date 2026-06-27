@@ -7,18 +7,13 @@ from app.schemas.research import (
 )
 from app.schemas.status import ResearchStatus, FailureReason
 from app.core.logging import get_logger
+from app.core.exceptions import AutoResearchError
+from app.agents.base import BaseResearchAgent
 
 logger = get_logger(__name__)
 
-
-# ─── In-Memory Repository (temporary) ────────────────────
-# Replace only these functions when adding a real database.
-# ResearchService stays untouched.
-
 _research_store: dict[UUID, ResearchDetailResponse] = {}
 
-
-# ─── Repository Boundary ─────────────────────────────────
 
 def _save(research: ResearchDetailResponse) -> None:
     _research_store[research.research_id] = research
@@ -37,7 +32,6 @@ def _update_status(
     research = _get(research_id)
     if not research:
         return None
-
     updated = research.model_copy(update={
         "status": status,
         "updated_at": datetime.now(timezone.utc),
@@ -48,14 +42,21 @@ def _update_status(
     return updated
 
 
-# ─── Service ──────────────────────────────────────────────
-
 class ResearchService:
     """
     Owns the lifecycle of a research task.
     Knows nothing about HTTP, FastAPI, or JSON.
-    Transport-agnostic by design.
+    Knows nothing about LangGraph.
+    Transport-agnostic and framework-agnostic by design.
     """
+
+    def __init__(self, agent: BaseResearchAgent):
+        """
+        Agent is injected — never instantiated here.
+        ResearchService depends on the Protocol,
+        not on any concrete implementation.
+        """
+        self.agent = agent
 
     def create_research(
         self, request: ResearchRequest
@@ -86,18 +87,66 @@ class ResearchService:
             status=ResearchStatus.QUEUED,
         )
 
+    async def run_research(self, research_id: UUID) -> None:
+        """
+        Executes the full research lifecycle asynchronously.
+        Called by background task after create_research returns.
+        Updates status at each lifecycle stage.
+        """
+        _update_status(research_id, ResearchStatus.PLANNING)
+
+        try:
+            research = _get(research_id)
+            if not research:
+                return
+
+            request = ResearchRequest(
+                query=research.query,
+                config=research.config,
+                output_format=research.output_format,
+                language=research.language,
+            )
+
+            _update_status(research_id, ResearchStatus.SEARCHING)
+            result = await self.agent.run(request, research_id)
+
+            # Promote result into stored research
+            updated = research.model_copy(update={
+                "status": ResearchStatus.COMPLETED,
+                "result": result,
+                "updated_at": datetime.now(timezone.utc),
+            })
+            _save(updated)
+
+            logger.info(
+                "research completed",
+                extra={"research_id": str(research_id)}
+            )
+
+        except AutoResearchError as e:
+            logger.error(
+                "research failed",
+                extra={
+                    "research_id": str(research_id),
+                    "error": str(e),
+                }
+            )
+            _update_status(
+                research_id,
+                ResearchStatus.FAILED,
+                error_message=str(e),
+            )
+
     def get_research(
         self, research_id: UUID
     ) -> ResearchDetailResponse | None:
         research = _get(research_id)
-
         if not research:
             logger.warning(
                 "research not found",
                 extra={"research_id": str(research_id)}
             )
             return None
-
         logger.info(
             "research retrieved",
             extra={"research_id": str(research_id)}
@@ -115,7 +164,7 @@ class ResearchService:
             "status updated",
             extra={
                 "research_id": str(research_id),
-                "status": status.value
+                "status": status.value,
             }
         )
         return _update_status(
