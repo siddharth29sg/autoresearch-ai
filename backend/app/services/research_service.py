@@ -4,20 +4,21 @@ from app.schemas.research import (
     ResearchRequest,
     ResearchCreatedResponse,
     ResearchDetailResponse,
-    ResearchConfig,
 )
 from app.schemas.status import ResearchStatus, FailureReason
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 # ─── In-Memory Repository (temporary) ────────────────────
-# This is the boundary Q5 referred to.
-# When we add a database, only this dict and its access
-# methods change. ResearchService stays untouched.
+# Replace only these functions when adding a real database.
+# ResearchService stays untouched.
 
 _research_store: dict[UUID, ResearchDetailResponse] = {}
 
 
-# ─── Repository Interface ─────────────────────────────────
+# ─── Repository Boundary ─────────────────────────────────
 
 def _save(research: ResearchDetailResponse) -> None:
     _research_store[research.research_id] = research
@@ -37,7 +38,6 @@ def _update_status(
     if not research:
         return None
 
-    # We use model_copy to preserve immutability of original
     updated = research.model_copy(update={
         "status": status,
         "updated_at": datetime.now(timezone.utc),
@@ -60,11 +60,6 @@ class ResearchService:
     def create_research(
         self, request: ResearchRequest
     ) -> ResearchCreatedResponse:
-        """
-        Creates a new research task.
-        Generates ID immediately so we can track it
-        before any background work begins.
-        """
         research_id = uuid4()
         now = datetime.now(timezone.utc)
 
@@ -81,6 +76,11 @@ class ResearchService:
 
         _save(research)
 
+        logger.info(
+            "research created",
+            extra={"research_id": str(research_id)}
+        )
+
         return ResearchCreatedResponse(
             research_id=research_id,
             status=ResearchStatus.QUEUED,
@@ -89,12 +89,20 @@ class ResearchService:
     def get_research(
         self, research_id: UUID
     ) -> ResearchDetailResponse | None:
-        """
-        Retrieves full research detail by ID.
-        Returns None if not found — API layer decides
-        whether to raise 404.
-        """
-        return _get(research_id)
+        research = _get(research_id)
+
+        if not research:
+            logger.warning(
+                "research not found",
+                extra={"research_id": str(research_id)}
+            )
+            return None
+
+        logger.info(
+            "research retrieved",
+            extra={"research_id": str(research_id)}
+        )
+        return research
 
     def update_status(
         self,
@@ -103,10 +111,13 @@ class ResearchService:
         failure_reason: FailureReason | None = None,
         error_message: str | None = None,
     ) -> ResearchDetailResponse | None:
-        """
-        Updates research status.
-        Called by the agent as it moves through lifecycle.
-        """
+        logger.info(
+            "status updated",
+            extra={
+                "research_id": str(research_id),
+                "status": status.value
+            }
+        )
         return _update_status(
             research_id=research_id,
             status=status,
@@ -115,8 +126,5 @@ class ResearchService:
         )
 
     def list_research(self) -> list[ResearchDetailResponse]:
-        """
-        Returns all research tasks.
-        Later this will be filtered by user_id.
-        """
+        logger.info("listing all research tasks")
         return list(_research_store.values())
