@@ -88,17 +88,14 @@ class LangGraphResearchAgent:
                 extra={
                     "research_id": research_id_str,
                     "error": error_msg,
+                    "error_type": type(e).__name__,
                 }
             )
-            # Classify the error into domain exceptions
             if "tavily" in error_msg.lower() or "search" in error_msg.lower():
                 raise SearchFailedError(reason=error_msg)
-            if "groq" in error_msg.lower() or "llm" in error_msg.lower():
-                raise LLMUnavailableError(provider="groq")
             if "timeout" in error_msg.lower():
                 raise ResearchTimeoutError(research_id=research_id)
-            # Re-raise as generic domain error
-            raise SearchFailedError(reason=f"Unexpected error: {error_msg}")
+            raise LLMUnavailableError(provider=f"groq: {error_msg}")
 
         # ─── Promote Graph State → Domain Result ──────────
         # This is the only place graph state crosses a boundary.

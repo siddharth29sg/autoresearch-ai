@@ -35,7 +35,6 @@ async def create_research(
     """
     response = service.create_research(request)
 
-    # Fire and forget — runs after response is sent
     background_tasks.add_task(
         service.run_research,
         response.research_id,
@@ -59,7 +58,7 @@ async def list_research(
 ) -> list[ResearchSummary]:
     """
     Returns a lightweight summary of all research tasks.
-    Does not include full reports — use GET /research/{id} for that.
+    Does not include full reports.
     """
     researches = service.list_research()
     return [
@@ -109,7 +108,6 @@ async def delete_research(
     """
     Deletes a research task.
     Returns 204 No Content on success.
-    Returns 404 if not found.
     """
     research = service.get_research(research_id)
 

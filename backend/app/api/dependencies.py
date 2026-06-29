@@ -7,20 +7,14 @@ from app.services.research_service import ResearchService
 
 @lru_cache
 def get_agent() -> BaseResearchAgent:
-    """
-    Returns the concrete agent implementation.
-    Swap this function to change the agent framework.
-    Routes never know which agent is underneath.
-    """
     return LangGraphResearchAgent()
 
 
-def get_research_service(
-    agent: BaseResearchAgent = Depends(get_agent),
-) -> ResearchService:
+@lru_cache
+def get_research_service() -> ResearchService:
     """
-    Constructs ResearchService with all dependencies injected.
-    If ResearchService gains new dependencies tomorrow,
-    only this function changes — routes stay untouched.
+    Single instance shared across all requests.
+    lru_cache ensures this is only constructed once.
+    _research_store is shared correctly as a result.
     """
-    return ResearchService(agent=agent)
+    return ResearchService(agent=get_agent())

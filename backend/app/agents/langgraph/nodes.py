@@ -216,6 +216,7 @@ async def reader_node(state: ResearchGraphState) -> dict:
             "url": result.get("url", ""),
             "domain": _extract_domain(result.get("url", "")),
             "content": content,
+            "content": content[:1500],  # truncate to prevent token overflow
             "relevance_score": float(result.get("score", 0.0)),
         }
         scraped_sources.append(source)
