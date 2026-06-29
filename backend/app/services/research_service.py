@@ -51,11 +51,6 @@ class ResearchService:
     """
 
     def __init__(self, agent: BaseResearchAgent):
-        """
-        Agent is injected — never instantiated here.
-        ResearchService depends on the Protocol,
-        not on any concrete implementation.
-        """
         self.agent = agent
 
     def create_research(
@@ -88,11 +83,6 @@ class ResearchService:
         )
 
     async def run_research(self, research_id: UUID) -> None:
-        """
-        Executes the full research lifecycle asynchronously.
-        Called by background task after create_research returns.
-        Updates status at each lifecycle stage.
-        """
         _update_status(research_id, ResearchStatus.PLANNING)
 
         try:
@@ -110,7 +100,6 @@ class ResearchService:
             _update_status(research_id, ResearchStatus.SEARCHING)
             result = await self.agent.run(request, research_id)
 
-            # Promote result into stored research
             updated = research.model_copy(update={
                 "status": ResearchStatus.COMPLETED,
                 "result": result,
@@ -177,3 +166,11 @@ class ResearchService:
     def list_research(self) -> list[ResearchDetailResponse]:
         logger.info("listing all research tasks")
         return list(_research_store.values())
+
+    def delete_research(self, research_id: UUID) -> None:
+        if research_id in _research_store:
+            del _research_store[research_id]
+            logger.info(
+                "research deleted",
+                extra={"research_id": str(research_id)}
+            )
